@@ -75,15 +75,48 @@ export const { handle, signIn, signOut } = SvelteKitAuth({
   },
 
   callbacks: {
-    async jwt({ token, user }) {
+    async signIn({ user, account }) {
+      // Block unverified credentials users
+      if (account?.provider === "credentials" && user?.email) {
+        const dbUser = await db.query.users.findFirst({
+          where: eq(users.email, user.email),
+        });
+        if (dbUser && !dbUser.emailVerified) {
+          return "/login?error=EmailNotVerified";
+        }
+      }
+      return true;
+    },
+    async jwt({ token, user, account }) {
       if (user) {
         token.id = user.id;
+      }
+      if (account) {
+        token.provider = account.provider;
+      }
+      // Refresh user data from database so profile changes reflect immediately
+      if (token.id) {
+        const dbUser = await db.query.users.findFirst({
+          where: eq(users.id, token.id as string),
+        });
+        if (dbUser) {
+          token.name = dbUser.name;
+          token.email = dbUser.email;
+          token.picture = dbUser.image;
+          token.role = dbUser.role;
+        }
       }
       return token;
     },
     async session({ session, token }) {
       if (token?.id) {
         session.user.id = token.id as string;
+      }
+      if (token?.provider) {
+        (session as any).provider = token.provider as string;
+      }
+      if (token?.role) {
+        (session as any).role = token.role as string;
       }
       return session;
     },

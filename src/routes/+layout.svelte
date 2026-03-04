@@ -21,6 +21,9 @@
       {#if session?.user}
         <a href="/dashboard" class="text-sm hover:text-gray-300 transition">Dashboard</a>
         <a href="/profile" class="text-sm hover:text-gray-300 transition">Profile</a>
+        {#if (session as any)?.role === "admin"}
+          <a href="/admin" class="text-sm text-yellow-400 hover:text-yellow-300 transition font-medium">Admin</a>
+        {/if}
         <span class="text-sm text-gray-400 hidden sm:inline">
           {session.user.name || session.user.email}
         </span>

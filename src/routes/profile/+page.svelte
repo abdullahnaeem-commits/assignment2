@@ -49,7 +49,7 @@
         <div class="flex justify-between items-center py-2 border-b border-gray-100">
           <span class="text-gray-500">Auth method</span>
           <span class="text-gray-900 font-medium">
-            {data.user?.hasPassword ? "Email & Password" : "OAuth"}
+            {data.isOAuth ? (data.provider === "google" ? "Google" : data.provider === "github" ? "GitHub" : "OAuth") : "Email & Password"}
           </span>
         </div>
       </div>
@@ -84,16 +84,24 @@
             type="email"
             required
             bind:value={email}
+            disabled={data.isOAuth}
             placeholder="you@email.com"
-            class="w-full border border-gray-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none"
+            class="w-full border border-gray-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none {data.isOAuth ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}"
           />
+          {#if data.isOAuth}
+            <p class="text-xs text-gray-400 mt-1">Email is managed by your {data.provider === "google" ? "Google" : "GitHub"} account</p>
+          {/if}
         </div>
 
         <!-- Password Change Section -->
         <div class="pt-4 border-t border-gray-200">
           <h3 class="text-sm font-semibold text-gray-900 mb-3">Change Password</h3>
 
-          {#if data.user?.hasPassword}
+          {#if data.isOAuth}
+            <p class="text-sm text-gray-500">
+              Password cannot be changed when signed in with {data.provider === "google" ? "Google" : "GitHub"}.
+            </p>
+          {:else}
             <div class="mb-3">
               <label for="currentPassword" class="block text-sm font-medium text-gray-700 mb-1">
                 Current Password
@@ -116,55 +124,46 @@
                 </button>
               </div>
             </div>
-          {/if}
 
-          <div class="mb-3">
-            <label for="newPassword" class="block text-sm font-medium text-gray-700 mb-1">
-              New Password
-            </label>
-            <div class="relative">
-              <input
-                id="newPassword"
-                name="newPassword"
-                type={showPasswords ? "text" : "password"}
-                bind:value={newPassword}
-                minlength="6"
-                placeholder="••••••••"
-                class="w-full border border-gray-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none pr-16"
-              />
-              {#if !data.user?.hasPassword}
-                <button
-                  type="button"
-                  onclick={() => (showPasswords = !showPasswords)}
-                  class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500 hover:text-gray-700 font-medium"
-                >
-                  {showPasswords ? "Hide" : "Show"}
-                </button>
+            <div class="mb-3">
+              <label for="newPassword" class="block text-sm font-medium text-gray-700 mb-1">
+                New Password
+              </label>
+              <div class="relative">
+                <input
+                  id="newPassword"
+                  name="newPassword"
+                  type={showPasswords ? "text" : "password"}
+                  bind:value={newPassword}
+                  minlength="6"
+                  placeholder="••••••••"
+                  class="w-full border border-gray-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              {#if newPassword.length > 0 && newPassword.length < 6}
+                <p class="text-red-500 text-xs mt-1">Must be at least 6 characters</p>
               {/if}
             </div>
-            {#if newPassword.length > 0 && newPassword.length < 6}
-              <p class="text-red-500 text-xs mt-1">Must be at least 6 characters</p>
-            {/if}
-          </div>
 
-          <div>
-            <label for="confirmPassword" class="block text-sm font-medium text-gray-700 mb-1">
-              Confirm New Password
-            </label>
-            <input
-              id="confirmPassword"
-              type={showPasswords ? "text" : "password"}
-              bind:value={confirmPassword}
-              minlength="6"
-              placeholder="••••••••"
-              class="w-full border border-gray-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none"
-            />
-            {#if passwordMismatch}
-              <p class="text-red-500 text-xs mt-1">Passwords don't match</p>
-            {/if}
-          </div>
+            <div>
+              <label for="confirmPassword" class="block text-sm font-medium text-gray-700 mb-1">
+                Confirm New Password
+              </label>
+              <input
+                id="confirmPassword"
+                type={showPasswords ? "text" : "password"}
+                bind:value={confirmPassword}
+                minlength="6"
+                placeholder="••••••••"
+                class="w-full border border-gray-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none"
+              />
+              {#if passwordMismatch}
+                <p class="text-red-500 text-xs mt-1">Passwords don't match</p>
+              {/if}
+            </div>
 
-          <p class="text-xs text-gray-400 mt-2">Leave password fields empty to keep your current password.</p>
+            <p class="text-xs text-gray-400 mt-2">Leave password fields empty to keep your current password.</p>
+          {/if}
         </div>
 
         <button

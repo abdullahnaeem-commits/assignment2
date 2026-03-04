@@ -20,6 +20,7 @@ export const users = pgTable("user", {
   image: text("image"),
 
   password: text("password"), // only for credentials login
+  role: text("role").default("user").notNull(), // "user" | "admin"
   createdAt: timestamp("created_at", { mode: "date" })
     .defaultNow()
     .notNull(),
@@ -68,6 +69,18 @@ export const accounts = pgTable(
     }),
   })
 );
+
+/* =========================
+   VERIFICATION TOKENS
+========================= */
+
+export const verificationTokens = pgTable("verification_token", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  email: text("email").notNull(),
+  token: text("token").notNull().unique(),
+  type: text("type").notNull(), // "email_verification" | "password_reset"
+  expires: timestamp("expires", { mode: "date" }).notNull(),
+});
 
 /* =========================
    TYPES (IMPORTANT)

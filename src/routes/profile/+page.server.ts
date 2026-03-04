@@ -13,8 +13,10 @@ export const load: PageServerLoad = async (event) => {
   }
 
   const user = await db.query.users.findFirst({
-    where: eq(users.email, session.user.email!),
+    where: eq(users.id, session.user.id!),
   });
+
+  const provider = (session as any).provider ?? "credentials";
 
   return {
     user: {
@@ -24,6 +26,8 @@ export const load: PageServerLoad = async (event) => {
       hasPassword: !!user?.password,
       createdAt: user?.createdAt?.toISOString() ?? "",
     },
+    provider,
+    isOAuth: provider !== "credentials",
   };
 };
 
@@ -41,23 +45,31 @@ export const actions: Actions = {
     const currentPassword = form.get("currentPassword") as string;
     const newPassword = form.get("newPassword") as string;
 
-    if (!email) {
+    const provider = (session as any).provider ?? "credentials";
+    const isOAuth = provider !== "credentials";
+
+    if (!isOAuth && !email) {
       return fail(400, { error: "Email is required." });
     }
 
     try {
       const user = await db.query.users.findFirst({
-        where: eq(users.email, session.user.email!),
+        where: eq(users.id, session.user.id!),
       });
 
       if (!user) {
         return fail(404, { error: "User not found." });
       }
 
-      const updateData: Record<string, any> = { name, email };
+      const updateData: Record<string, any> = { name };
 
-      // Handle password change
-      if (newPassword) {
+      // Only allow email/password changes for credentials users
+      if (!isOAuth && email) {
+        updateData.email = email;
+      }
+
+      // Handle password change (credentials users only)
+      if (!isOAuth && newPassword) {
         if (newPassword.length < 6) {
           return fail(400, { error: "New password must be at least 6 characters." });
         }
@@ -77,7 +89,7 @@ export const actions: Actions = {
       }
 
       // Check if new email is already taken by another user
-      if (email !== session.user.email) {
+      if (!isOAuth && email && email !== user.email) {
         const existing = await db.query.users.findFirst({
           where: eq(users.email, email),
         });
@@ -89,11 +101,11 @@ export const actions: Actions = {
       await db
         .update(users)
         .set(updateData)
-        .where(eq(users.email, session.user.email!));
+        .where(eq(users.id, session.user.id!));
 
       return { success: true };
     } catch (err) {
-      console.error("Profile update error:", err);
+
       return fail(500, { error: "Failed to update profile." });
     }
   },
