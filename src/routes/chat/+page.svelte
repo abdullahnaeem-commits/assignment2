@@ -7,15 +7,21 @@
     id: string;
     role: "user" | "assistant";
     content: string;
+    position: number;
+    branch: string;
+    branchGroup: string | null;
+    branchIndex: number;
+    parentMessageId: string | null;
   };
 
-  type Conversation = {
-    id: string;
-    title: string;
-    updatedAt: string;
-  };
+  type Conversation = { id: string; title: string; updatedAt: string };
 
-  let messages: Message[] = $state([]);
+  let allMessages: Message[] = $state([]);
+  // For each branchGroup, which branchIndex is active
+  let activeVersions: Record<string, number> = $state({});
+  // The branch we're currently "on" for sending new messages
+  let activeBranch = $state("main");
+
   let input = $state("");
   let isLoading = $state(false);
   let error: string | null = $state(null);
@@ -25,7 +31,75 @@
   let activeConversationId: string | null = $state(null);
   let sidebarOpen = $state(false);
 
-  // Load conversations on mount
+  /**
+   * Build the visible message list by walking positions and following
+   * the active branch at each fork point.
+   */
+  const visibleMessages = $derived.by(() => {
+    if (allMessages.length === 0) return [];
+
+    // Group by position
+    const byPos: Record<number, Message[]> = {};
+    for (const m of allMessages) {
+      if (!byPos[m.position]) byPos[m.position] = [];
+      byPos[m.position].push(m);
+    }
+
+    const positions = Object.keys(byPos).map(Number).sort((a, b) => a - b);
+    const result: Message[] = [];
+    let currentBranch = "main";
+
+    for (const pos of positions) {
+      const msgs = byPos[pos];
+
+      // Check if this position has a fork (branchGroup)
+      const forked = msgs.filter((m) => m.branchGroup);
+      if (forked.length > 0) {
+        const bg = forked[0].branchGroup!;
+        const activeIdx = activeVersions[bg] ?? latestIndex(bg);
+        const chosen = forked.find(
+          (m) => m.branchGroup === bg && m.branchIndex === activeIdx
+        );
+        if (chosen) {
+          result.push(chosen);
+          // Switch current branch to follow the chosen fork
+          if (chosen.branchIndex === 0) {
+            currentBranch = chosen.branch; // stays "main" for original
+          } else {
+            currentBranch = chosen.branch; // the branchGroup UUID for edits
+          }
+        }
+      } else {
+        // Non-forked position: only show if it belongs to current branch
+        const matching = msgs.filter((m) => m.branch === currentBranch);
+        if (matching.length > 0) {
+          result.push(matching[0]);
+        }
+      }
+    }
+
+    return result;
+  });
+
+  function latestIndex(bg: string): number {
+    const msgs = allMessages.filter((m) => m.branchGroup === bg);
+    return msgs.length > 0 ? Math.max(...msgs.map((m) => m.branchIndex)) : 0;
+  }
+
+  function versionCount(bg: string, role: string): number {
+    return allMessages.filter((m) => m.branchGroup === bg && m.role === role).length;
+  }
+
+  // Derive which branch we're on based on the last visible message
+  $effect(() => {
+    const vis = visibleMessages;
+    if (vis.length > 0) {
+      activeBranch = vis[vis.length - 1].branch;
+    } else {
+      activeBranch = "main";
+    }
+  });
+
   $effect(() => {
     loadConversations();
   });
@@ -33,26 +107,27 @@
   async function loadConversations() {
     try {
       const res = await fetch("/api/conversations");
-      if (res.ok) {
-        conversationsList = await res.json();
-      }
-    } catch {
-      // silently fail
-    }
+      if (res.ok) conversationsList = await res.json();
+    } catch { /* ignore */ }
   }
 
   async function loadConversation(id: string) {
     try {
       const res = await fetch(`/api/conversations/${id}`);
       if (!res.ok) return;
-
       const data = await res.json();
       activeConversationId = id;
-      messages = data.messages.map((m: any) => ({
+      allMessages = data.messages.map((m: any) => ({
         id: m.id,
         role: m.role,
         content: m.content,
+        position: m.position ?? 0,
+        branch: m.branch ?? "main",
+        branchGroup: m.branchGroup ?? m.branch_group ?? null,
+        branchIndex: m.branchIndex ?? m.branch_index ?? 0,
+        parentMessageId: m.parentMessageId ?? m.parent_message_id ?? null,
       }));
+      activeVersions = {};
       error = null;
       sidebarOpen = false;
       scrollToBottom();
@@ -69,10 +144,7 @@
         body: JSON.stringify({ conversationId: id }),
       });
       conversationsList = conversationsList.filter((c) => c.id !== id);
-      if (activeConversationId === id) {
-        activeConversationId = null;
-        messages = [];
-      }
+      if (activeConversationId === id) startNewChat();
     } catch {
       error = "Failed to delete conversation";
     }
@@ -80,7 +152,9 @@
 
   function startNewChat() {
     activeConversationId = null;
-    messages = [];
+    allMessages = [];
+    activeVersions = {};
+    activeBranch = "main";
     error = null;
     input = "";
     sidebarOpen = false;
@@ -88,61 +162,74 @@
 
   function scrollToBottom() {
     if (chatContainer) {
-      setTimeout(() => {
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-      }, 0);
+      setTimeout(() => { chatContainer.scrollTop = chatContainer.scrollHeight; }, 0);
     }
   }
 
-  async function sendMessages(messagesToSend: Message[], opts?: { editIndex?: number; regenerate?: boolean }) {
+  function handleVersionChange(branchGroup: string, newIndex: number) {
+    activeVersions = { ...activeVersions, [branchGroup]: newIndex };
+  }
+
+  // === Send a normal new message ===
+  async function handleSubmit() {
+    if (!input.trim() || isLoading) return;
+
+    const maxPos = allMessages.length > 0
+      ? Math.max(...allMessages.map((m) => m.position))
+      : -1;
+
+    const tempUser: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: input.trim(),
+      position: maxPos + 1,
+      branch: activeBranch,
+      branchGroup: null,
+      branchIndex: 0,
+      parentMessageId: null,
+    };
+
+    allMessages = [...allMessages, tempUser];
+    const userContent = input.trim();
+    input = "";
     isLoading = true;
     error = null;
     scrollToBottom();
 
     try {
+      const contextMsgs = visibleMessages.map((m) => ({
+        role: m.role, content: m.content,
+      }));
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: messagesToSend.map((m) => ({ role: m.role, content: m.content })),
+          messages: contextMsgs,
           conversationId: activeConversationId,
-          editIndex: opts?.editIndex,
-          regenerate: opts?.regenerate,
+          currentBranch: activeBranch,
         }),
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to get response (${response.status})`);
-      }
+      if (!response.ok) throw new Error(`Failed (${response.status})`);
 
       const newConvId = response.headers.get("X-Conversation-Id");
-      if (newConvId && !activeConversationId) {
-        activeConversationId = newConvId;
-      }
+      if (newConvId && !activeConversationId) activeConversationId = newConvId;
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response stream");
-
-      const assistantMessage: Message = {
+      const tempAssistant: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
         content: "",
+        position: maxPos + 2,
+        branch: activeBranch,
+        branchGroup: null,
+        branchIndex: 0,
+        parentMessageId: tempUser.id,
       };
-      messages = [...messagesToSend, assistantMessage];
+      allMessages = [...allMessages, tempAssistant];
 
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const text = decoder.decode(value, { stream: true });
-        assistantMessage.content += text;
-        messages = [...messages.slice(0, -1), { ...assistantMessage }];
-        scrollToBottom();
-      }
-
-      await loadConversations();
+      await readStream(response, tempAssistant);
+      await reloadConversation();
     } catch (e) {
       error = e instanceof Error ? e.message : "Something went wrong";
     } finally {
@@ -151,39 +238,116 @@
     }
   }
 
-  async function handleSubmit() {
-    if (!input.trim() || isLoading) return;
+  // === Edit a message: fork the conversation ===
+  async function handleEdit(msg: Message, newContent: string) {
+    isLoading = true;
+    error = null;
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: input.trim(),
-    };
+    // Context = all visible messages before the edit position
+    const contextMsgs = visibleMessages
+      .filter((m) => m.position < msg.position)
+      .map((m) => ({ role: m.role, content: m.content }));
 
-    messages = [...messages, userMessage];
-    input = "";
-    await sendMessages(messages);
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [...contextMsgs, { role: "user", content: newContent }],
+          conversationId: activeConversationId,
+          editPosition: msg.position,
+          currentBranch: activeBranch,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Failed (${response.status})`);
+
+      const branchMetaStr = response.headers.get("X-Branch-Meta");
+      let newBranch = activeBranch;
+      let branchGroup: string | null = null;
+      let branchIndex = 0;
+      if (branchMetaStr) {
+        const meta = JSON.parse(branchMetaStr);
+        branchGroup = meta.branchGroup;
+        branchIndex = meta.branchIndex;
+        newBranch = meta.branch;
+      }
+
+      // Add temp messages for streaming
+      const tempUser: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: newContent,
+        position: msg.position,
+        branch: newBranch,
+        branchGroup,
+        branchIndex,
+        parentMessageId: null,
+      };
+      const tempAssistant: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: "",
+        position: msg.position + 1,
+        branch: newBranch,
+        branchGroup,
+        branchIndex,
+        parentMessageId: tempUser.id,
+      };
+
+      allMessages = [...allMessages, tempUser, tempAssistant];
+      if (branchGroup) {
+        activeVersions = { ...activeVersions, [branchGroup]: branchIndex };
+      }
+
+      await readStream(response, tempAssistant);
+
+      // Save the selected version before reload
+      const savedVersions = branchGroup
+        ? { ...activeVersions, [branchGroup]: branchIndex }
+        : { ...activeVersions };
+
+      await reloadConversation();
+      activeVersions = savedVersions;
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Something went wrong";
+    } finally {
+      isLoading = false;
+      scrollToBottom();
+    }
   }
 
-  function handleEdit(index: number, newContent: string) {
-    // Replace the edited message and remove everything after it
-    const edited: Message = { ...messages[index], content: newContent };
-    const trimmed = [...messages.slice(0, index), edited];
-    messages = trimmed;
-    sendMessages(trimmed, { editIndex: index });
+  // === Regenerate: re-edit with same content ===
+  async function handleRegenerate() {
+    const vis = visibleMessages;
+    if (vis.length < 2) return;
+    const lastAssistant = vis[vis.length - 1];
+    const lastUser = vis[vis.length - 2];
+    if (lastAssistant.role !== "assistant" || lastUser.role !== "user") return;
+    await handleEdit(lastUser, lastUser.content);
   }
 
-  function handleRegenerate() {
-    if (messages.length < 2) return;
-    // Remove the last assistant message and re-send
-    const withoutLast = messages.slice(0, -1);
-    messages = withoutLast;
-    sendMessages(withoutLast, { regenerate: true });
+  // === Helpers ===
+  async function readStream(response: Response, target: Message) {
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No stream");
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      target.content += decoder.decode(value, { stream: true });
+      allMessages = [...allMessages.slice(0, -1), { ...target }];
+      scrollToBottom();
+    }
+  }
+
+  async function reloadConversation() {
+    await loadConversations();
+    if (activeConversationId) await loadConversation(activeConversationId);
   }
 </script>
 
 <div class="flex h-[calc(100vh-64px)]">
-  <!-- Mobile sidebar toggle -->
   <button
     onclick={() => (sidebarOpen = !sidebarOpen)}
     class="md:hidden fixed bottom-20 left-3 z-50 bg-gray-900 text-white p-2.5 rounded-full shadow-lg"
@@ -194,16 +358,11 @@
     </svg>
   </button>
 
-  <!-- Sidebar -->
-  <div
-    class="
-      {sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-      md:translate-x-0 transition-transform duration-200
-      fixed md:relative z-40
-      w-64 h-[calc(100vh-64px)]
-      flex-shrink-0
-    "
-  >
+  <div class="
+    {sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+    md:translate-x-0 transition-transform duration-200
+    fixed md:relative z-40 w-64 h-[calc(100vh-64px)] flex-shrink-0
+  ">
     <ChatSidebar
       conversations={conversationsList}
       activeId={activeConversationId}
@@ -213,7 +372,6 @@
     />
   </div>
 
-  <!-- Overlay for mobile -->
   {#if sidebarOpen}
     <button
       class="fixed inset-0 bg-black/30 z-30 md:hidden"
@@ -222,30 +380,21 @@
     ></button>
   {/if}
 
-  <!-- Chat area -->
   <div class="flex-1 flex flex-col bg-white min-w-0">
-    <!-- Header -->
     <div class="border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between bg-white">
       <div>
         <h1 class="text-lg font-semibold text-gray-900">AI Chat</h1>
         <p class="text-xs text-gray-500">Powered by Google Gemini</p>
       </div>
-      {#if messages.length > 0}
-        <button
-          onclick={startNewChat}
-          class="text-sm text-gray-500 hover:text-blue-600 transition px-3 py-1.5 rounded-lg hover:bg-gray-100"
-        >
+      {#if visibleMessages.length > 0}
+        <button onclick={startNewChat} class="text-sm text-gray-500 hover:text-blue-600 transition px-3 py-1.5 rounded-lg hover:bg-gray-100">
           New Chat
         </button>
       {/if}
     </div>
 
-    <!-- Messages -->
-    <div
-      bind:this={chatContainer}
-      class="flex-1 overflow-y-auto px-4 sm:px-6 py-4"
-    >
-      {#if messages.length === 0}
+    <div bind:this={chatContainer} class="flex-1 overflow-y-auto px-4 sm:px-6 py-4">
+      {#if visibleMessages.length === 0}
         <div class="flex flex-col items-center justify-center h-full text-center">
           <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
             <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -253,23 +402,27 @@
             </svg>
           </div>
           <h2 class="text-xl font-semibold text-gray-900 mb-2">Start a conversation</h2>
-          <p class="text-gray-500 text-sm max-w-sm">
-            Ask me anything! I'm powered by Google Gemini and ready to help.
-          </p>
+          <p class="text-gray-500 text-sm max-w-sm">Ask me anything! I'm powered by Google Gemini and ready to help.</p>
         </div>
       {:else}
-        {#each messages as message, i (message.id)}
+        {#each visibleMessages as message, i (message.id)}
+          {@const bg = message.branchGroup}
+          {@const vc = bg ? versionCount(bg, message.role) : 1}
+          {@const cv = bg ? (activeVersions[bg] ?? latestIndex(bg)) : 0}
           <ChatMessage
             role={message.role}
             content={message.content}
-            isLast={i === messages.length - 1}
+            isLast={i === visibleMessages.length - 1}
             {isLoading}
-            onedit={message.role === "user" ? (newContent) => handleEdit(i, newContent) : undefined}
-            onregenerate={message.role === "assistant" && i === messages.length - 1 ? handleRegenerate : undefined}
+            versionCount={vc}
+            currentVersion={cv}
+            onversionchange={bg ? (idx) => handleVersionChange(bg, idx) : undefined}
+            onedit={message.role === "user" ? (nc) => handleEdit(message, nc) : undefined}
+            onregenerate={message.role === "assistant" && i === visibleMessages.length - 1 ? handleRegenerate : undefined}
           />
         {/each}
 
-        {#if isLoading && messages[messages.length - 1]?.role === "user"}
+        {#if isLoading && visibleMessages[visibleMessages.length - 1]?.role === "user"}
           <div class="flex justify-start mb-4">
             <div class="bg-gray-100 rounded-2xl rounded-bl-md px-4 py-3">
               <div class="flex items-center gap-1">
@@ -283,7 +436,6 @@
       {/if}
     </div>
 
-    <!-- Error -->
     {#if error}
       <div class="mx-4 sm:mx-6 mb-2 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg text-sm flex items-center justify-between">
         <span>{error}</span>
@@ -295,7 +447,6 @@
       </div>
     {/if}
 
-    <!-- Input -->
     <div class="border-t border-gray-200 px-4 sm:px-6 py-3 bg-white">
       <ChatInput bind:value={input} onsubmit={handleSubmit} {isLoading} />
     </div>

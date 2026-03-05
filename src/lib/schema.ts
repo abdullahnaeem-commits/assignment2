@@ -107,6 +107,12 @@ export const chatMessages = pgTable("chat_message", {
     .references(() => conversations.id, { onDelete: "cascade" }),
   role: text("role").notNull(), // "user" | "assistant"
   content: text("content").notNull(),
+  position: integer("position").default(0).notNull(), // message order in conversation
+  // Fork tracking
+  branch: text("branch").default("main").notNull(), // "main" or a branchGroup UUID
+  branchGroup: text("branch_group"), // groups fork-point versions together
+  branchIndex: integer("branch_index").default(0).notNull(), // 0 = original, 1+ = edits
+  parentMessageId: text("parent_message_id"), // links assistant to its user msg
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 

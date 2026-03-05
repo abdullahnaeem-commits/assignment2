@@ -4,14 +4,13 @@ import { eq, and, asc } from "drizzle-orm";
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 
-// GET: Load messages for a specific conversation
+// GET: Load messages for a specific conversation (with version data)
 export const GET: RequestHandler = async ({ params, locals }) => {
   const session = await locals.auth();
   if (!session?.user?.id) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  // Verify conversation belongs to user
   const [conv] = await db
     .select()
     .from(conversations)
@@ -26,11 +25,11 @@ export const GET: RequestHandler = async ({ params, locals }) => {
     return new Response("Not found", { status: 404 });
   }
 
-  const messages = await db
+  const allMessages = await db
     .select()
     .from(chatMessages)
     .where(eq(chatMessages.conversationId, params.id))
-    .orderBy(asc(chatMessages.createdAt));
+    .orderBy(asc(chatMessages.position), asc(chatMessages.branchIndex));
 
-  return json({ conversation: conv, messages });
+  return json({ conversation: conv, messages: allMessages });
 };
