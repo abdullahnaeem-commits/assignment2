@@ -47,7 +47,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
   }
 
   const result = streamText({
-    model: google("gemini-2.0-flash"),
+    model: google("gemini-2.5-flash-preview-05-20"),
     system: "You are a helpful AI assistant. Be concise and clear in your responses.",
     messages,
     async onFinish({ text }) {
