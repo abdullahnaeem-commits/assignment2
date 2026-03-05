@@ -94,18 +94,7 @@
     }
   }
 
-  async function handleSubmit() {
-    if (!input.trim() || isLoading) return;
-
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: input.trim(),
-    };
-
-    messages = [...messages, userMessage];
-    const currentInput = input;
-    input = "";
+  async function sendMessages(messagesToSend: Message[]) {
     isLoading = true;
     error = null;
     scrollToBottom();
@@ -115,7 +104,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+          messages: messagesToSend.map((m) => ({ role: m.role, content: m.content })),
           conversationId: activeConversationId,
         }),
       });
@@ -124,7 +113,6 @@
         throw new Error(`Failed to get response (${response.status})`);
       }
 
-      // Capture the conversation ID from the response
       const newConvId = response.headers.get("X-Conversation-Id");
       if (newConvId && !activeConversationId) {
         activeConversationId = newConvId;
@@ -138,7 +126,7 @@
         role: "assistant",
         content: "",
       };
-      messages = [...messages, assistantMessage];
+      messages = [...messagesToSend, assistantMessage];
 
       const decoder = new TextDecoder();
 
@@ -152,17 +140,43 @@
         scrollToBottom();
       }
 
-      // Refresh conversation list
       await loadConversations();
     } catch (e) {
       error = e instanceof Error ? e.message : "Something went wrong";
-      if (messages.length > 0 && messages[messages.length - 1].role === "user") {
-        input = currentInput;
-      }
     } finally {
       isLoading = false;
       scrollToBottom();
     }
+  }
+
+  async function handleSubmit() {
+    if (!input.trim() || isLoading) return;
+
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: input.trim(),
+    };
+
+    messages = [...messages, userMessage];
+    input = "";
+    await sendMessages(messages);
+  }
+
+  function handleEdit(index: number, newContent: string) {
+    // Replace the edited message and remove everything after it
+    const edited: Message = { ...messages[index], content: newContent };
+    const trimmed = [...messages.slice(0, index), edited];
+    messages = trimmed;
+    sendMessages(trimmed);
+  }
+
+  function handleRegenerate() {
+    if (messages.length < 2) return;
+    // Remove the last assistant message and re-send
+    const withoutLast = messages.slice(0, -1);
+    messages = withoutLast;
+    sendMessages(withoutLast);
   }
 </script>
 
@@ -242,8 +256,15 @@
           </p>
         </div>
       {:else}
-        {#each messages as message (message.id)}
-          <ChatMessage role={message.role} content={message.content} />
+        {#each messages as message, i (message.id)}
+          <ChatMessage
+            role={message.role}
+            content={message.content}
+            isLast={i === messages.length - 1}
+            {isLoading}
+            onedit={message.role === "user" ? (newContent) => handleEdit(i, newContent) : undefined}
+            onregenerate={message.role === "assistant" && i === messages.length - 1 ? handleRegenerate : undefined}
+          />
         {/each}
 
         {#if isLoading && messages[messages.length - 1]?.role === "user"}
