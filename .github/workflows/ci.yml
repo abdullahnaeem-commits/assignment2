@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Sync SvelteKit
+        run: npx svelte-kit sync
+        env:
+          DATABASE_URL: postgresql://localhost:5432/test
+          AUTH_SECRET: ci-test-secret
+          GOOGLE_CLIENT_ID: test
+          GOOGLE_CLIENT_SECRET: test
+          GITHUB_CLIENT_ID: test
+          GITHUB_CLIENT_SECRET: test
+          SMTP_HOST: localhost
+          SMTP_PORT: "587"
+          SMTP_USER: test@test.com
+          SMTP_PASS: test
+          GEMINI_API_KEY: test
+
+      - name: Type check
+        run: npx svelte-check --tsconfig ./tsconfig.json
+        env:
+          DATABASE_URL: postgresql://localhost:5432/test
+          AUTH_SECRET: ci-test-secret
+          GOOGLE_CLIENT_ID: test
+          GOOGLE_CLIENT_SECRET: test
+          GITHUB_CLIENT_ID: test
+          GITHUB_CLIENT_SECRET: test
+          SMTP_HOST: localhost
+          SMTP_PORT: "587"
+          SMTP_USER: test@test.com
+          SMTP_PASS: test
+          GEMINI_API_KEY: test
+
+      - name: Build
+        run: npm run build
+        env:
+          DATABASE_URL: postgresql://localhost:5432/test
+          AUTH_SECRET: ci-test-secret
+          GOOGLE_CLIENT_ID: test
+          GOOGLE_CLIENT_SECRET: test
+          GITHUB_CLIENT_ID: test
+          GITHUB_CLIENT_SECRET: test
+          SMTP_HOST: localhost
+          SMTP_PORT: "587"
+          SMTP_USER: test@test.com
+          SMTP_PASS: test
+          GEMINI_API_KEY: test

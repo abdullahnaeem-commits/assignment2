@@ -1,5 +1,7 @@
 # Assignment 2 - Full Auth.js + AI Chat Interface
 
+[![CI](https://github.com/abdullahnaeem-commits/assignment2/actions/workflows/ci.yml/badge.svg)](https://github.com/abdullahnaeem-commits/assignment2/actions/workflows/ci.yml)
+
 A full-stack authentication application built with SvelteKit, Auth.js, PostgreSQL, Drizzle ORM, and an AI-powered chat interface using Vercel AI SDK with Google Gemini.
 
 ## Tech Stack

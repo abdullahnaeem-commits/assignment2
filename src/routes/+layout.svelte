@@ -22,6 +22,7 @@
     <div class="hidden md:flex items-center gap-4">
       {#if session?.user}
         <a href="/dashboard" class="text-sm hover:text-gray-300 transition">Dashboard</a>
+        <a href="/chat" class="text-sm hover:text-gray-300 transition">Chat</a>
         <a href="/profile" class="text-sm hover:text-gray-300 transition">Profile</a>
         {#if (session as any)?.role === "admin"}
           <a href="/admin" class="text-sm text-yellow-400 hover:text-yellow-300 transition font-medium">Admin</a>
@@ -72,6 +73,7 @@
           {session.user.name || session.user.email}
         </div>
         <a href="/dashboard" class="block py-2 text-sm hover:text-gray-300 transition" onclick={() => (mobileMenuOpen = false)}>Dashboard</a>
+        <a href="/chat" class="block py-2 text-sm hover:text-gray-300 transition" onclick={() => (mobileMenuOpen = false)}>Chat</a>
         <a href="/profile" class="block py-2 text-sm hover:text-gray-300 transition" onclick={() => (mobileMenuOpen = false)}>Profile</a>
         {#if (session as any)?.role === "admin"}
           <a href="/admin" class="block py-2 text-sm text-yellow-400 hover:text-yellow-300 transition font-medium" onclick={() => (mobileMenuOpen = false)}>Admin</a>

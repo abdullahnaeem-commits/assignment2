@@ -83,6 +83,34 @@ export const verificationTokens = pgTable("verification_token", {
 });
 
 /* =========================
+   CHAT CONVERSATIONS
+========================= */
+
+export const conversations = pgTable("conversation", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("userId")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull().default("New Chat"),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+/* =========================
+   CHAT MESSAGES
+========================= */
+
+export const chatMessages = pgTable("chat_message", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  conversationId: uuid("conversationId")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  role: text("role").notNull(), // "user" | "assistant"
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+});
+
+/* =========================
    TYPES (IMPORTANT)
 ========================= */
 
@@ -91,3 +119,6 @@ export type NewUser = typeof users.$inferInsert;
 
 export type Session = typeof sessions.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
+
+export type Conversation = typeof conversations.$inferSelect;
+export type ChatMessage = typeof chatMessages.$inferSelect;
