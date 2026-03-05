@@ -94,7 +94,7 @@
     }
   }
 
-  async function sendMessages(messagesToSend: Message[]) {
+  async function sendMessages(messagesToSend: Message[], opts?: { editIndex?: number; regenerate?: boolean }) {
     isLoading = true;
     error = null;
     scrollToBottom();
@@ -106,6 +106,8 @@
         body: JSON.stringify({
           messages: messagesToSend.map((m) => ({ role: m.role, content: m.content })),
           conversationId: activeConversationId,
+          editIndex: opts?.editIndex,
+          regenerate: opts?.regenerate,
         }),
       });
 
@@ -168,7 +170,7 @@
     const edited: Message = { ...messages[index], content: newContent };
     const trimmed = [...messages.slice(0, index), edited];
     messages = trimmed;
-    sendMessages(trimmed);
+    sendMessages(trimmed, { editIndex: index });
   }
 
   function handleRegenerate() {
@@ -176,7 +178,7 @@
     // Remove the last assistant message and re-send
     const withoutLast = messages.slice(0, -1);
     messages = withoutLast;
-    sendMessages(withoutLast);
+    sendMessages(withoutLast, { regenerate: true });
   }
 </script>
 

@@ -3,7 +3,7 @@ import { streamText } from "ai";
 import { GEMINI_API_KEY } from "$env/static/private";
 import { db } from "$lib/db";
 import { conversations, chatMessages } from "$lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, asc, gt } from "drizzle-orm";
 import type { RequestHandler } from "./$types";
 
 const google = createGoogleGenerativeAI({
@@ -17,7 +17,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       return new Response("Unauthorized", { status: 401 });
     }
 
-    const { messages, conversationId } = await request.json();
+    const { messages, conversationId, editIndex, regenerate } = await request.json();
 
     // Get or create conversation
     let convId = conversationId;
@@ -30,21 +30,72 @@ export const POST: RequestHandler = async ({ request, locals }) => {
         .returning();
       convId = conv.id;
     } else {
-      // Update the conversation timestamp
       await db
         .update(conversations)
         .set({ updatedAt: new Date() })
         .where(eq(conversations.id, convId));
     }
 
-    // Save user message
-    const lastUserMessage = messages[messages.length - 1];
-    if (lastUserMessage?.role === "user") {
-      await db.insert(chatMessages).values({
-        conversationId: convId,
-        role: "user",
-        content: lastUserMessage.content,
-      });
+    // Handle edit: delete messages from edit point onward, then save the edited message
+    if (editIndex !== undefined && convId) {
+      const existingMessages = await db
+        .select()
+        .from(chatMessages)
+        .where(eq(chatMessages.conversationId, convId))
+        .orderBy(asc(chatMessages.createdAt));
+
+      if (existingMessages[editIndex]) {
+        // Delete this message and all after it
+        const cutoffTime = existingMessages[editIndex].createdAt;
+        await db
+          .delete(chatMessages)
+          .where(
+            eq(chatMessages.conversationId, convId)
+          );
+        // Re-insert only the messages before the edit point
+        const keepMessages = existingMessages.slice(0, editIndex);
+        for (const msg of keepMessages) {
+          await db.insert(chatMessages).values({
+            conversationId: convId,
+            role: msg.role,
+            content: msg.content,
+          });
+        }
+      }
+
+      // Save the edited user message
+      const lastUserMessage = messages[messages.length - 1];
+      if (lastUserMessage?.role === "user") {
+        await db.insert(chatMessages).values({
+          conversationId: convId,
+          role: "user",
+          content: lastUserMessage.content,
+        });
+      }
+    }
+    // Handle regenerate: delete the last assistant message
+    else if (regenerate && convId) {
+      const existingMessages = await db
+        .select()
+        .from(chatMessages)
+        .where(eq(chatMessages.conversationId, convId))
+        .orderBy(asc(chatMessages.createdAt));
+
+      const lastMsg = existingMessages[existingMessages.length - 1];
+      if (lastMsg?.role === "assistant") {
+        await db.delete(chatMessages).where(eq(chatMessages.id, lastMsg.id));
+      }
+    }
+    // Normal new message: just save the user message
+    else {
+      const lastUserMessage = messages[messages.length - 1];
+      if (lastUserMessage?.role === "user") {
+        await db.insert(chatMessages).values({
+          conversationId: convId,
+          role: "user",
+          content: lastUserMessage.content,
+        });
+      }
     }
 
     const result = streamText({
@@ -52,7 +103,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       system: "You are a helpful AI assistant. Be concise and clear in your responses.",
       messages,
       async onFinish({ text }) {
-        // Save assistant response to database
         await db.insert(chatMessages).values({
           conversationId: convId,
           role: "assistant",
